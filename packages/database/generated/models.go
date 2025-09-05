@@ -5,95 +5,164 @@
 package db
 
 import (
+	"database/sql/driver"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type IdempotencyKey struct {
-	Key       string
-	CreatedAt pgtype.Timestamp
+type OrderStatus string
+
+const (
+	OrderStatusPending   OrderStatus = "pending"
+	OrderStatusPaid      OrderStatus = "paid"
+	OrderStatusFulfilled OrderStatus = "fulfilled"
+)
+
+func (e *OrderStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OrderStatus(s)
+	case string:
+		*e = OrderStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OrderStatus: %T", src)
+	}
+	return nil
 }
 
-type MerchDrop struct {
-	ID          pgtype.UUID
-	StoreID     pgtype.UUID
-	Name        string
-	Description pgtype.Text
-	StartTime   pgtype.Timestamp
-	EndTime     pgtype.Timestamp
-	IsActive    pgtype.Bool
-	CreatedAt   pgtype.Timestamp
-	UpdatedAt   pgtype.Timestamp
+type NullOrderStatus struct {
+	OrderStatus OrderStatus
+	Valid       bool // Valid is true if OrderStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOrderStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.OrderStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OrderStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOrderStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OrderStatus), nil
+}
+
+type UserRole string
+
+const (
+	UserRoleAdmin    UserRole = "admin"
+	UserRoleCustomer UserRole = "customer"
+)
+
+func (e *UserRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserRole(s)
+	case string:
+		*e = UserRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserRole: %T", src)
+	}
+	return nil
+}
+
+type NullUserRole struct {
+	UserRole UserRole
+	Valid    bool // Valid is true if UserRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserRole), nil
+}
+
+type IdempotencyKey struct {
+	ID        pgtype.UUID
+	Key       string
+	UsedFor   string
+	CreatedAt pgtype.Timestamp
+	UserID    pgtype.UUID
 }
 
 type Order struct {
-	ID         pgtype.UUID
-	StoreID    pgtype.UUID
-	UserID     pgtype.UUID
-	DropID     pgtype.UUID
-	Status     string
-	TotalCents int32
-	CreatedAt  pgtype.Timestamp
-	UpdatedAt  pgtype.Timestamp
+	ID               pgtype.UUID
+	Quantity         int32
+	TotalPrice       pgtype.Numeric
+	Status           pgtype.Text
+	CreatedAt        pgtype.Timestamp
+	UpdatedAt        pgtype.Timestamp
+	UserID           pgtype.UUID
+	ProductID        pgtype.UUID
+	StoreID          pgtype.UUID
+	IdempotencyKeyID pgtype.UUID
 }
 
 type OrderItem struct {
-	ID               pgtype.UUID
-	OrderID          pgtype.UUID
-	ProductVariantID pgtype.UUID
-	Quantity         int32
-	PriceCents       int32
-	CreatedAt        pgtype.Timestamp
-	UpdatedAt        pgtype.Timestamp
+	ID        pgtype.UUID
+	OrderID   pgtype.UUID
+	ProductID pgtype.UUID
+	Quantity  int32
 }
 
 type Payment struct {
-	ID            pgtype.UUID
-	OrderID       pgtype.UUID
-	Provider      pgtype.Text
-	AmountCents   int32
-	Status        string
-	TransactionID string
-	CreatedAt     pgtype.Timestamp
-	UpdatedAt     pgtype.Timestamp
+	ID               pgtype.UUID
+	Amount           pgtype.Numeric
+	Method           pgtype.Text
+	Status           pgtype.Text
+	CreatedAt        pgtype.Timestamp
+	UpdatedAt        pgtype.Timestamp
+	IdempotencyKeyID pgtype.UUID
+	OrderID          pgtype.UUID
 }
 
 type Product struct {
 	ID          pgtype.UUID
-	DropID      pgtype.UUID
 	Name        string
-	Description pgtype.Text
-	PriceCents  int32
-	ImageUrl    pgtype.Text
+	Description string
+	Price       pgtype.Numeric
+	Stock       int32
 	CreatedAt   pgtype.Timestamp
 	UpdatedAt   pgtype.Timestamp
-}
-
-type ProductVariant struct {
-	ID        pgtype.UUID
-	ProductID pgtype.UUID
-	Size      pgtype.Text
-	Color     pgtype.Text
-	Stock     int32
-	CreatedAt pgtype.Timestamp
-	UpdatedAt pgtype.Timestamp
+	StoreID     pgtype.UUID
 }
 
 type Store struct {
-	ID        pgtype.UUID
-	Name      string
-	Domain    pgtype.Text
-	IsActive  pgtype.Bool
-	CreatedAt pgtype.Timestamp
-	UpdatedAt pgtype.Timestamp
+	ID          pgtype.UUID
+	Name        string
+	Domain      pgtype.Text
+	Description string
+	CreatedAt   pgtype.Timestamp
+	UpdatedAt   pgtype.Timestamp
+	AdminID     pgtype.UUID
 }
 
 type User struct {
 	ID           pgtype.UUID
-	StoreID      pgtype.UUID
 	Name         string
 	Email        string
 	PasswordHash string
-	Role         string
+	IsActive     bool
+	Role         UserRole
 	CreatedAt    pgtype.Timestamp
 	UpdatedAt    pgtype.Timestamp
 }
