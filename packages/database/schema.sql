@@ -26,7 +26,7 @@ CREATE TABLE users (
                        created_at TIMESTAMP DEFAULT NOW(),
                        updated_at TIMESTAMP DEFAULT NOW(),
                        UNIQUE (store_id, email)
-); -- <-- Added missing semicolon
+);
 
 -- =====================================
 -- MERCH DROPS
