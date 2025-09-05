@@ -1,5 +1,5 @@
 DB_DIR=./packages/database
-DB_URL=postgres://user:password@localhost:5432/merchdrop?sslmode=disable
+DB_URL=postgres://postgres:qin123@localhost:5432/merchdrop?sslmode=disable
 
 .PHONY: migrateup
 migrateup:
