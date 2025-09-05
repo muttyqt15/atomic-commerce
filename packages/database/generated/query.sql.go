@@ -11,64 +11,192 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createUser = `-- name: CreateUser :one
-INSERT INTO users (store_id, name, email, password_hash, role)
-VALUES ($1, $2, $3, $4, $5)
-    RETURNING id, store_id, name, email, password_hash, role, created_at, updated_at
+const createOrder = `-- name: CreateOrder :one
+INSERT INTO orders (quantity, total_price, status, user_id, product_id, store_id, idempotency_key_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
 `
 
-type CreateUserParams struct {
-	StoreID      pgtype.UUID
-	Name         string
-	Email        string
-	PasswordHash string
-	Role         string
+type CreateOrderParams struct {
+	Quantity         int32
+	TotalPrice       pgtype.Numeric
+	Status           pgtype.Text
+	UserID           pgtype.UUID
+	ProductID        pgtype.UUID
+	StoreID          pgtype.UUID
+	IdempotencyKeyID pgtype.UUID
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser,
+func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createOrder,
+		arg.Quantity,
+		arg.TotalPrice,
+		arg.Status,
+		arg.UserID,
+		arg.ProductID,
 		arg.StoreID,
-		arg.Name,
-		arg.Email,
-		arg.PasswordHash,
-		arg.Role,
+		arg.IdempotencyKeyID,
 	)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.StoreID,
-		&i.Name,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Role,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
-const getUserByEmailAndStore = `-- name: GetUserByEmailAndStore :one
-SELECT id, store_id, name, email, password_hash, role, created_at, updated_at FROM users
-WHERE store_id = $1 AND email = $2
+const createPayment = `-- name: CreatePayment :one
+INSERT INTO payments (amount, method, status, order_id, idempotency_key_id)
+VALUES ($1, $2, $3, $4, $5) RETURNING id
 `
 
-type GetUserByEmailAndStoreParams struct {
-	StoreID pgtype.UUID
-	Email   string
+type CreatePaymentParams struct {
+	Amount           pgtype.Numeric
+	Method           pgtype.Text
+	Status           pgtype.Text
+	OrderID          pgtype.UUID
+	IdempotencyKeyID pgtype.UUID
 }
 
-func (q *Queries) GetUserByEmailAndStore(ctx context.Context, arg GetUserByEmailAndStoreParams) (User, error) {
-	row := q.db.QueryRow(ctx, getUserByEmailAndStore, arg.StoreID, arg.Email)
-	var i User
+func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createPayment,
+		arg.Amount,
+		arg.Method,
+		arg.Status,
+		arg.OrderID,
+		arg.IdempotencyKeyID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const fulfillOrder = `-- name: FulfillOrder :exec
+UPDATE orders
+SET status     = 'fulfilled',
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) FulfillOrder(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, fulfillOrder, id)
+	return err
+}
+
+const getProductDetails = `-- name: GetProductDetails :one
+SELECT p.id, p.name, p.description, s.name AS store_name
+FROM products p
+         JOIN stores s ON p.store_id = s.id
+WHERE p.id = $1
+`
+
+type GetProductDetailsRow struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	StoreName   string
+}
+
+func (q *Queries) GetProductDetails(ctx context.Context, id pgtype.UUID) (GetProductDetailsRow, error) {
+	row := q.db.QueryRow(ctx, getProductDetails, id)
+	var i GetProductDetailsRow
 	err := row.Scan(
 		&i.ID,
-		&i.StoreID,
 		&i.Name,
-		&i.Email,
-		&i.PasswordHash,
-		&i.Role,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.Description,
+		&i.StoreName,
 	)
 	return i, err
+}
+
+const getProductsByStore = `-- name: GetProductsByStore :many
+SELECT id, name, description, created_at, updated_at
+FROM products
+WHERE store_id = $1
+`
+
+type GetProductsByStoreRow struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	CreatedAt   pgtype.Timestamp
+	UpdatedAt   pgtype.Timestamp
+}
+
+func (q *Queries) GetProductsByStore(ctx context.Context, storeID pgtype.UUID) ([]GetProductsByStoreRow, error) {
+	rows, err := q.db.Query(ctx, getProductsByStore, storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetProductsByStoreRow
+	for rows.Next() {
+		var i GetProductsByStoreRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrdersByUser = `-- name: ListOrdersByUser :many
+SELECT o.id,
+       o.quantity,
+       o.total_price,
+       o.status,
+       o.created_at,
+       o.updated_at,
+       p.name AS product_name,
+       s.name AS store_name
+FROM orders o
+         JOIN products p ON o.product_id = p.id
+         JOIN stores s ON o.store_id = s.id
+WHERE o.user_id = $1
+ORDER BY o.created_at DESC
+`
+
+type ListOrdersByUserRow struct {
+	ID          pgtype.UUID
+	Quantity    int32
+	TotalPrice  pgtype.Numeric
+	Status      pgtype.Text
+	CreatedAt   pgtype.Timestamp
+	UpdatedAt   pgtype.Timestamp
+	ProductName string
+	StoreName   string
+}
+
+func (q *Queries) ListOrdersByUser(ctx context.Context, userID pgtype.UUID) ([]ListOrdersByUserRow, error) {
+	rows, err := q.db.Query(ctx, listOrdersByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrdersByUserRow
+	for rows.Next() {
+		var i ListOrdersByUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Quantity,
+			&i.TotalPrice,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProductName,
+			&i.StoreName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
