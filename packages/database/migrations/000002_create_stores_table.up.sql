@@ -7,7 +7,8 @@ CREATE TABLE stores
     created_at  TIMESTAMP        DEFAULT NOW(),
     updated_at  TIMESTAMP        DEFAULT NOW(),
 
-    admin_id    UUID         NOT NULL REFERENCES users (id) ON DELETE CASCADE
+    admin_id    UUID         NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    UNIQUE (admin_id, name)
 );
 
 CREATE TABLE products
@@ -20,5 +21,6 @@ CREATE TABLE products
     created_at  TIMESTAMP               DEFAULT NOW(),
     updated_at  TIMESTAMP               DEFAULT NOW(),
 
-    store_id    UUID           NOT NULL REFERENCES stores (id) ON DELETE CASCADE
+    store_id    UUID           NOT NULL REFERENCES stores (id) ON DELETE CASCADE,
+    UNIQUE (store_id, name)
 );
