@@ -1,2 +1,7 @@
 go 1.23.3
 
+use (
+	./apps/api
+	./apps/workers
+	./packages/database
+)
