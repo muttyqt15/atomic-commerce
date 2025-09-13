@@ -49,3 +49,6 @@ VALUES ($1, $2, $3, $4) RETURNING id;
 -- name: CreateProduct :one
 INSERT INTO products (name, description, price, stock)
 VALUES ($1, $2, $3, $4) RETURNING id;
+
+-- name: GetAllUsers :many
+SELECT * FROM users;

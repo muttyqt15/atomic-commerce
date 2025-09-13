@@ -24,7 +24,7 @@ sqlc-generate:
 .PHONY: dev-api
 dev-api:
 	@echo "🚀 Starting API Gateway in dev mode..."
-	cd apps/api-gateway && air
+	cd apps/api && air
 
 .PHONY: dev-worker
 dev-worker:
