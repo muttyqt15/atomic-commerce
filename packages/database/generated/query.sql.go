@@ -67,6 +67,72 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (p
 	return id, err
 }
 
+const createProduct = `-- name: CreateProduct :one
+INSERT INTO products (name, description, price, stock)
+VALUES ($1, $2, $3, $4) RETURNING id
+`
+
+type CreateProductParams struct {
+	Name        string
+	Description string
+	Price       pgtype.Numeric
+	Stock       int32
+}
+
+func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createProduct,
+		arg.Name,
+		arg.Description,
+		arg.Price,
+		arg.Stock,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createStore = `-- name: CreateStore :one
+INSERT INTO stores (name, domain, description, admin_id)
+VALUES ($1, $2, $3, $4) RETURNING id
+`
+
+type CreateStoreParams struct {
+	Name        string
+	Domain      pgtype.Text
+	Description string
+	AdminID     pgtype.UUID
+}
+
+func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createStore,
+		arg.Name,
+		arg.Domain,
+		arg.Description,
+		arg.AdminID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const createUser = `-- name: CreateUser :one
+INSERT INTO users (name, email, password_hash)
+VALUES ($1, $2, $3) RETURNING id
+`
+
+type CreateUserParams struct {
+	Name         string
+	Email        string
+	PasswordHash string
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.PasswordHash)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const fulfillOrder = `-- name: FulfillOrder :exec
 UPDATE orders
 SET status     = 'fulfilled',

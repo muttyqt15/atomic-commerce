@@ -146,6 +146,11 @@ type Product struct {
 	StoreID     pgtype.UUID
 }
 
+type SchemaMigration struct {
+	Version int64
+	Dirty   bool
+}
+
 type Store struct {
 	ID          pgtype.UUID
 	Name        string

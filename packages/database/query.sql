@@ -37,3 +37,15 @@ WHERE id = $1;
 -- name: CreatePayment :one
 INSERT INTO payments (amount, method, status, order_id, idempotency_key_id)
 VALUES ($1, $2, $3, $4, $5) RETURNING id;
+
+-- name: CreateUser :one
+INSERT INTO users (name, email, password_hash)
+VALUES ($1, $2, $3) RETURNING id;
+
+-- name: CreateStore :one
+INSERT INTO stores (name, domain, description, admin_id)
+VALUES ($1, $2, $3, $4) RETURNING id;
+
+-- name: CreateProduct :one
+INSERT INTO products (name, description, price, stock)
+VALUES ($1, $2, $3, $4) RETURNING id;
