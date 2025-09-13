@@ -20,3 +20,13 @@ generate-schema:
 .PHONY: sqlc-generate
 sqlc-generate:
 	cd $(DB_DIR) && sqlc generate
+
+.PHONY: dev-api
+dev-api:
+	@echo "🚀 Starting API Gateway in dev mode..."
+	cd apps/api-gateway && air
+
+.PHONY: dev-worker
+dev-worker:
+	@echo "🚀 Starting Worker Service in dev mode..."
+	cd apps/worker && air

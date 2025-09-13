@@ -12,7 +12,7 @@ func main() {
 
 	router.GET("/health", func(c *gin.Context) {
 		data := gin.H{"lang": "GO语言"}
-		c.AsciiJSON(http.StatusOK, gin.H{"data": data})
+		c.AsciiJSON(http.StatusOK, data)
 	})
 
 	err := router.Run(":8080")

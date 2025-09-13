@@ -1,1 +1,50 @@
-.idea/**
+# ======================
+# Go build artifacts
+# ======================
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# ======================
+# Workspace / Modules
+# ======================
+/vendor/
+**/tmp/
+/dist/
+/bin/
+
+# ======================
+# IDE / Editor files
+# ======================
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# ======================
+# OS files
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# Logs
+# ======================
+*.log
+logs/
+
+# ======================
+# Database dumps
+# ======================
+*.sql
+*.sql.gz
+
+# ======================
+# Generated code
+# ======================
+/packages/database/generated/
