@@ -11,65 +11,148 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cleanupOldIdempotencyKeys = `-- name: CleanupOldIdempotencyKeys :exec
+DELETE FROM idempotency_keys
+WHERE created_at < NOW() - INTERVAL '24 hours'
+  AND used_for = $1
+`
+
+func (q *Queries) CleanupOldIdempotencyKeys(ctx context.Context, usedFor string) error {
+	_, err := q.db.Exec(ctx, cleanupOldIdempotencyKeys, usedFor)
+	return err
+}
+
+const createIdempotencyKey = `-- name: CreateIdempotencyKey :one
+INSERT INTO idempotency_keys (key, used_for, user_id)
+VALUES ($1, $2, $3)
+    RETURNING id, key, used_for, created_at, user_id
+`
+
+type CreateIdempotencyKeyParams struct {
+	Key     string
+	UsedFor string
+	UserID  pgtype.UUID
+}
+
+// idempotency_keys
+func (q *Queries) CreateIdempotencyKey(ctx context.Context, arg CreateIdempotencyKeyParams) (IdempotencyKey, error) {
+	row := q.db.QueryRow(ctx, createIdempotencyKey, arg.Key, arg.UsedFor, arg.UserID)
+	var i IdempotencyKey
+	err := row.Scan(
+		&i.ID,
+		&i.Key,
+		&i.UsedFor,
+		&i.CreatedAt,
+		&i.UserID,
+	)
+	return i, err
+}
+
 const createOrder = `-- name: CreateOrder :one
-INSERT INTO orders (quantity, total_price, status, user_id, product_id, store_id, idempotency_key_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id
+INSERT INTO orders (quantity, total_price, user_id, product_id, store_id, idempotency_key_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING id, quantity, total_price, status, created_at, updated_at, user_id, product_id, store_id, idempotency_key_id
 `
 
 type CreateOrderParams struct {
 	Quantity         int32
 	TotalPrice       pgtype.Numeric
-	Status           pgtype.Text
 	UserID           pgtype.UUID
 	ProductID        pgtype.UUID
 	StoreID          pgtype.UUID
 	IdempotencyKeyID pgtype.UUID
 }
 
-func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (pgtype.UUID, error) {
+// orders
+func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) (Order, error) {
 	row := q.db.QueryRow(ctx, createOrder,
 		arg.Quantity,
 		arg.TotalPrice,
-		arg.Status,
 		arg.UserID,
 		arg.ProductID,
 		arg.StoreID,
 		arg.IdempotencyKeyID,
 	)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Quantity,
+		&i.TotalPrice,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ProductID,
+		&i.StoreID,
+		&i.IdempotencyKeyID,
+	)
+	return i, err
+}
+
+const createOrderItem = `-- name: CreateOrderItem :one
+INSERT INTO order_items (order_id, product_id, quantity)
+VALUES ($1, $2, $3)
+    RETURNING id, order_id, product_id, quantity
+`
+
+type CreateOrderItemParams struct {
+	OrderID   pgtype.UUID
+	ProductID pgtype.UUID
+	Quantity  int32
+}
+
+// order_items
+func (q *Queries) CreateOrderItem(ctx context.Context, arg CreateOrderItemParams) (OrderItem, error) {
+	row := q.db.QueryRow(ctx, createOrderItem, arg.OrderID, arg.ProductID, arg.Quantity)
+	var i OrderItem
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.ProductID,
+		&i.Quantity,
+	)
+	return i, err
 }
 
 const createPayment = `-- name: CreatePayment :one
-INSERT INTO payments (amount, method, status, order_id, idempotency_key_id)
-VALUES ($1, $2, $3, $4, $5) RETURNING id
+INSERT INTO payments (amount, method, order_id, idempotency_key_id)
+VALUES ($1, $2, $3, $4)
+    RETURNING id, amount, method, status, created_at, updated_at, idempotency_key_id, order_id
 `
 
 type CreatePaymentParams struct {
 	Amount           pgtype.Numeric
 	Method           pgtype.Text
-	Status           pgtype.Text
 	OrderID          pgtype.UUID
 	IdempotencyKeyID pgtype.UUID
 }
 
-func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (pgtype.UUID, error) {
+// payments
+func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (Payment, error) {
 	row := q.db.QueryRow(ctx, createPayment,
 		arg.Amount,
 		arg.Method,
-		arg.Status,
 		arg.OrderID,
 		arg.IdempotencyKeyID,
 	)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.Amount,
+		&i.Method,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IdempotencyKeyID,
+		&i.OrderID,
+	)
+	return i, err
 }
 
 const createProduct = `-- name: CreateProduct :one
-INSERT INTO products (name, description, price, stock)
-VALUES ($1, $2, $3, $4) RETURNING id
+INSERT INTO products (name, description, price, stock, store_id)
+VALUES ($1, $2, $3, $4, $5)
+    RETURNING id, name, description, price, stock, created_at, updated_at, store_id
 `
 
 type CreateProductParams struct {
@@ -77,23 +160,36 @@ type CreateProductParams struct {
 	Description string
 	Price       pgtype.Numeric
 	Stock       int32
+	StoreID     pgtype.UUID
 }
 
-func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (pgtype.UUID, error) {
+// products
+func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error) {
 	row := q.db.QueryRow(ctx, createProduct,
 		arg.Name,
 		arg.Description,
 		arg.Price,
 		arg.Stock,
+		arg.StoreID,
 	)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Price,
+		&i.Stock,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StoreID,
+	)
+	return i, err
 }
 
 const createStore = `-- name: CreateStore :one
 INSERT INTO stores (name, domain, description, admin_id)
-VALUES ($1, $2, $3, $4) RETURNING id
+VALUES ($1, $2, $3, $4)
+    RETURNING id, name, domain, description, created_at, updated_at, admin_id
 `
 
 type CreateStoreParams struct {
@@ -103,21 +199,31 @@ type CreateStoreParams struct {
 	AdminID     pgtype.UUID
 }
 
-func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (pgtype.UUID, error) {
+// stores
+func (q *Queries) CreateStore(ctx context.Context, arg CreateStoreParams) (Store, error) {
 	row := q.db.QueryRow(ctx, createStore,
 		arg.Name,
 		arg.Domain,
 		arg.Description,
 		arg.AdminID,
 	)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i Store
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AdminID,
+	)
+	return i, err
 }
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (name, email, password_hash)
-VALUES ($1, $2, $3) RETURNING id
+VALUES ($1, $2, $3)
+    RETURNING id, name, email, password_hash, is_active, role, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -126,27 +232,191 @@ type CreateUserParams struct {
 	PasswordHash string
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (pgtype.UUID, error) {
+// users
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.PasswordHash)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.PasswordHash,
+		&i.IsActive,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
-const fulfillOrder = `-- name: FulfillOrder :exec
-UPDATE orders
-SET status     = 'fulfilled',
-    updated_at = NOW()
+const deleteIdempotencyKey = `-- name: DeleteIdempotencyKey :exec
+DELETE FROM idempotency_keys
 WHERE id = $1
 `
 
-func (q *Queries) FulfillOrder(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, fulfillOrder, id)
+func (q *Queries) DeleteIdempotencyKey(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteIdempotencyKey, id)
 	return err
+}
+
+const deleteOrder = `-- name: DeleteOrder :exec
+DELETE FROM orders WHERE id = $1
+`
+
+func (q *Queries) DeleteOrder(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteOrder, id)
+	return err
+}
+
+const deleteOrderItems = `-- name: DeleteOrderItems :exec
+DELETE FROM order_items WHERE order_id = $1
+`
+
+func (q *Queries) DeleteOrderItems(ctx context.Context, orderID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteOrderItems, orderID)
+	return err
+}
+
+const deletePayment = `-- name: DeletePayment :exec
+DELETE FROM payments WHERE id = $1
+`
+
+func (q *Queries) DeletePayment(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePayment, id)
+	return err
+}
+
+const deleteProduct = `-- name: DeleteProduct :exec
+DELETE FROM products WHERE id = $1
+`
+
+func (q *Queries) DeleteProduct(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteProduct, id)
+	return err
+}
+
+const deleteStore = `-- name: DeleteStore :exec
+DELETE FROM stores WHERE id = $1
+`
+
+func (q *Queries) DeleteStore(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteStore, id)
+	return err
+}
+
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users
+WHERE id = $1
+`
+
+func (q *Queries) DeleteUser(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
+const getAllOrders = `-- name: GetAllOrders :many
+SELECT id, quantity, total_price, status, created_at, updated_at, user_id, product_id, store_id, idempotency_key_id FROM orders ORDER BY created_at DESC
+`
+
+func (q *Queries) GetAllOrders(ctx context.Context) ([]Order, error) {
+	rows, err := q.db.Query(ctx, getAllOrders)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Order
+	for rows.Next() {
+		var i Order
+		if err := rows.Scan(
+			&i.ID,
+			&i.Quantity,
+			&i.TotalPrice,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UserID,
+			&i.ProductID,
+			&i.StoreID,
+			&i.IdempotencyKeyID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllProducts = `-- name: GetAllProducts :many
+SELECT id, name, description, price, stock, created_at, updated_at, store_id FROM products ORDER BY created_at DESC
+`
+
+func (q *Queries) GetAllProducts(ctx context.Context) ([]Product, error) {
+	rows, err := q.db.Query(ctx, getAllProducts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Price,
+			&i.Stock,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StoreID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllStores = `-- name: GetAllStores :many
+SELECT id, name, domain, description, created_at, updated_at, admin_id FROM stores ORDER BY created_at DESC
+`
+
+func (q *Queries) GetAllStores(ctx context.Context) ([]Store, error) {
+	rows, err := q.db.Query(ctx, getAllStores)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Store
+	for rows.Next() {
+		var i Store
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Domain,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AdminID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAllUsers = `-- name: GetAllUsers :many
 SELECT id, name, email, password_hash, is_active, role, created_at, updated_at FROM users
+ORDER BY created_at DESC
 `
 
 func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
@@ -178,61 +448,108 @@ func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const getProductDetails = `-- name: GetProductDetails :one
-SELECT p.id, p.name, p.description, s.name AS store_name
-FROM products p
-         JOIN stores s ON p.store_id = s.id
-WHERE p.id = $1
+const getIdempotencyKeyByID = `-- name: GetIdempotencyKeyByID :one
+SELECT id, key, used_for, created_at, user_id
+FROM idempotency_keys
+WHERE id = $1
 `
 
-type GetProductDetailsRow struct {
-	ID          pgtype.UUID
-	Name        string
-	Description string
-	StoreName   string
-}
-
-func (q *Queries) GetProductDetails(ctx context.Context, id pgtype.UUID) (GetProductDetailsRow, error) {
-	row := q.db.QueryRow(ctx, getProductDetails, id)
-	var i GetProductDetailsRow
+func (q *Queries) GetIdempotencyKeyByID(ctx context.Context, id pgtype.UUID) (IdempotencyKey, error) {
+	row := q.db.QueryRow(ctx, getIdempotencyKeyByID, id)
+	var i IdempotencyKey
 	err := row.Scan(
 		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.StoreName,
+		&i.Key,
+		&i.UsedFor,
+		&i.CreatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
-const getProductsByStore = `-- name: GetProductsByStore :many
-SELECT id, name, description, created_at, updated_at
-FROM products
-WHERE store_id = $1
+const getIdempotencyKeyByKey = `-- name: GetIdempotencyKeyByKey :one
+SELECT id, key, used_for, created_at, user_id
+FROM idempotency_keys
+WHERE key = $1
 `
 
-type GetProductsByStoreRow struct {
-	ID          pgtype.UUID
-	Name        string
-	Description string
-	CreatedAt   pgtype.Timestamp
-	UpdatedAt   pgtype.Timestamp
+func (q *Queries) GetIdempotencyKeyByKey(ctx context.Context, key string) (IdempotencyKey, error) {
+	row := q.db.QueryRow(ctx, getIdempotencyKeyByKey, key)
+	var i IdempotencyKey
+	err := row.Scan(
+		&i.ID,
+		&i.Key,
+		&i.UsedFor,
+		&i.CreatedAt,
+		&i.UserID,
+	)
+	return i, err
 }
 
-func (q *Queries) GetProductsByStore(ctx context.Context, storeID pgtype.UUID) ([]GetProductsByStoreRow, error) {
-	rows, err := q.db.Query(ctx, getProductsByStore, storeID)
+const getOrder = `-- name: GetOrder :one
+SELECT id, quantity, total_price, status, created_at, updated_at, user_id, product_id, store_id, idempotency_key_id FROM orders WHERE id = $1
+`
+
+func (q *Queries) GetOrder(ctx context.Context, id pgtype.UUID) (Order, error) {
+	row := q.db.QueryRow(ctx, getOrder, id)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Quantity,
+		&i.TotalPrice,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ProductID,
+		&i.StoreID,
+		&i.IdempotencyKeyID,
+	)
+	return i, err
+}
+
+const getOrderByIdempotencyKeyID = `-- name: GetOrderByIdempotencyKeyID :one
+SELECT id, quantity, total_price, status, created_at, updated_at, user_id, product_id, store_id, idempotency_key_id
+FROM orders
+WHERE idempotency_key_id = $1
+`
+
+func (q *Queries) GetOrderByIdempotencyKeyID(ctx context.Context, idempotencyKeyID pgtype.UUID) (Order, error) {
+	row := q.db.QueryRow(ctx, getOrderByIdempotencyKeyID, idempotencyKeyID)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Quantity,
+		&i.TotalPrice,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ProductID,
+		&i.StoreID,
+		&i.IdempotencyKeyID,
+	)
+	return i, err
+}
+
+const getOrderItems = `-- name: GetOrderItems :many
+SELECT id, order_id, product_id, quantity FROM order_items WHERE order_id = $1
+`
+
+func (q *Queries) GetOrderItems(ctx context.Context, orderID pgtype.UUID) ([]OrderItem, error) {
+	rows, err := q.db.Query(ctx, getOrderItems, orderID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []GetProductsByStoreRow
+	var items []OrderItem
 	for rows.Next() {
-		var i GetProductsByStoreRow
+		var i OrderItem
 		if err := rows.Scan(
 			&i.ID,
-			&i.Name,
-			&i.Description,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.OrderID,
+			&i.ProductID,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -244,51 +561,48 @@ func (q *Queries) GetProductsByStore(ctx context.Context, storeID pgtype.UUID) (
 	return items, nil
 }
 
-const listOrdersByUser = `-- name: ListOrdersByUser :many
-SELECT o.id,
-       o.quantity,
-       o.total_price,
-       o.status,
-       o.created_at,
-       o.updated_at,
-       p.name AS product_name,
-       s.name AS store_name
-FROM orders o
-         JOIN products p ON o.product_id = p.id
-         JOIN stores s ON o.store_id = s.id
-WHERE o.user_id = $1
-ORDER BY o.created_at DESC
+const getPayment = `-- name: GetPayment :one
+SELECT id, amount, method, status, created_at, updated_at, idempotency_key_id, order_id FROM payments WHERE id = $1
 `
 
-type ListOrdersByUserRow struct {
-	ID          pgtype.UUID
-	Quantity    int32
-	TotalPrice  pgtype.Numeric
-	Status      pgtype.Text
-	CreatedAt   pgtype.Timestamp
-	UpdatedAt   pgtype.Timestamp
-	ProductName string
-	StoreName   string
+func (q *Queries) GetPayment(ctx context.Context, id pgtype.UUID) (Payment, error) {
+	row := q.db.QueryRow(ctx, getPayment, id)
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.Amount,
+		&i.Method,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IdempotencyKeyID,
+		&i.OrderID,
+	)
+	return i, err
 }
 
-func (q *Queries) ListOrdersByUser(ctx context.Context, userID pgtype.UUID) ([]ListOrdersByUserRow, error) {
-	rows, err := q.db.Query(ctx, listOrdersByUser, userID)
+const getPaymentsForOrder = `-- name: GetPaymentsForOrder :many
+SELECT id, amount, method, status, created_at, updated_at, idempotency_key_id, order_id FROM payments WHERE order_id = $1
+`
+
+func (q *Queries) GetPaymentsForOrder(ctx context.Context, orderID pgtype.UUID) ([]Payment, error) {
+	rows, err := q.db.Query(ctx, getPaymentsForOrder, orderID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListOrdersByUserRow
+	var items []Payment
 	for rows.Next() {
-		var i ListOrdersByUserRow
+		var i Payment
 		if err := rows.Scan(
 			&i.ID,
-			&i.Quantity,
-			&i.TotalPrice,
+			&i.Amount,
+			&i.Method,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ProductName,
-			&i.StoreName,
+			&i.IdempotencyKeyID,
+			&i.OrderID,
 		); err != nil {
 			return nil, err
 		}
@@ -298,4 +612,312 @@ func (q *Queries) ListOrdersByUser(ctx context.Context, userID pgtype.UUID) ([]L
 		return nil, err
 	}
 	return items, nil
+}
+
+const getProduct = `-- name: GetProduct :one
+SELECT id, name, description, price, stock, created_at, updated_at, store_id FROM products WHERE id = $1
+`
+
+func (q *Queries) GetProduct(ctx context.Context, id pgtype.UUID) (Product, error) {
+	row := q.db.QueryRow(ctx, getProduct, id)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Price,
+		&i.Stock,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StoreID,
+	)
+	return i, err
+}
+
+const getProductForUpdate = `-- name: GetProductForUpdate :one
+SELECT stock, price, store_id
+FROM products
+WHERE id = $1
+    FOR NO KEY UPDATE
+`
+
+type GetProductForUpdateRow struct {
+	Stock   int32
+	Price   pgtype.Numeric
+	StoreID pgtype.UUID
+}
+
+// Get product details and lock the row for the duration of the transaction.
+// This is the query that PREVENTS the race condition.
+// "FOR NO KEY UPDATE" is a slightly less restrictive lock than "FOR UPDATE",
+// which is often sufficient and better for concurrency.
+func (q *Queries) GetProductForUpdate(ctx context.Context, id pgtype.UUID) (GetProductForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getProductForUpdate, id)
+	var i GetProductForUpdateRow
+	err := row.Scan(&i.Stock, &i.Price, &i.StoreID)
+	return i, err
+}
+
+const getStore = `-- name: GetStore :one
+SELECT id, name, domain, description, created_at, updated_at, admin_id FROM stores WHERE id = $1
+`
+
+func (q *Queries) GetStore(ctx context.Context, id pgtype.UUID) (Store, error) {
+	row := q.db.QueryRow(ctx, getStore, id)
+	var i Store
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AdminID,
+	)
+	return i, err
+}
+
+const getUser = `-- name: GetUser :one
+SELECT id, name, email, password_hash, is_active, role, created_at, updated_at FROM users
+WHERE id = $1
+`
+
+func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUser, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.PasswordHash,
+		&i.IsActive,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateOrderStatus = `-- name: UpdateOrderStatus :one
+UPDATE orders
+SET status = $2, updated_at = now()
+WHERE id = $1
+    RETURNING id, quantity, total_price, status, created_at, updated_at, user_id, product_id, store_id, idempotency_key_id
+`
+
+type UpdateOrderStatusParams struct {
+	ID     pgtype.UUID
+	Status pgtype.Text
+}
+
+func (q *Queries) UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) (Order, error) {
+	row := q.db.QueryRow(ctx, updateOrderStatus, arg.ID, arg.Status)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Quantity,
+		&i.TotalPrice,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.ProductID,
+		&i.StoreID,
+		&i.IdempotencyKeyID,
+	)
+	return i, err
+}
+
+const updatePaymentStatus = `-- name: UpdatePaymentStatus :one
+UPDATE payments
+SET status = $2, updated_at = now()
+WHERE id = $1
+    RETURNING id, amount, method, status, created_at, updated_at, idempotency_key_id, order_id
+`
+
+type UpdatePaymentStatusParams struct {
+	ID     pgtype.UUID
+	Status pgtype.Text
+}
+
+func (q *Queries) UpdatePaymentStatus(ctx context.Context, arg UpdatePaymentStatusParams) (Payment, error) {
+	row := q.db.QueryRow(ctx, updatePaymentStatus, arg.ID, arg.Status)
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.Amount,
+		&i.Method,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IdempotencyKeyID,
+		&i.OrderID,
+	)
+	return i, err
+}
+
+const updateProduct = `-- name: UpdateProduct :one
+UPDATE products
+SET name = $2, description = $3, price = $4, stock = $5, updated_at = now()
+WHERE id = $1
+    RETURNING id, name, description, price, stock, created_at, updated_at, store_id
+`
+
+type UpdateProductParams struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	Price       pgtype.Numeric
+	Stock       int32
+}
+
+func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error) {
+	row := q.db.QueryRow(ctx, updateProduct,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.Price,
+		arg.Stock,
+	)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Price,
+		&i.Stock,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StoreID,
+	)
+	return i, err
+}
+
+const updateProductStock = `-- name: UpdateProductStock :one
+UPDATE products
+SET stock = stock - $2, updated_at = now()
+WHERE id = $1 AND stock >= $2
+    RETURNING id, name, description, price, stock, created_at, updated_at, store_id
+`
+
+type UpdateProductStockParams struct {
+	ID    pgtype.UUID
+	Stock int32
+}
+
+func (q *Queries) UpdateProductStock(ctx context.Context, arg UpdateProductStockParams) (Product, error) {
+	row := q.db.QueryRow(ctx, updateProductStock, arg.ID, arg.Stock)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Price,
+		&i.Stock,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StoreID,
+	)
+	return i, err
+}
+
+const updateProductStockAbsolute = `-- name: UpdateProductStockAbsolute :one
+UPDATE products
+SET stock = $2, updated_at = now()
+WHERE id = $1
+    RETURNING id, name, description, price, stock, created_at, updated_at, store_id
+`
+
+type UpdateProductStockAbsoluteParams struct {
+	ID    pgtype.UUID
+	Stock int32
+}
+
+func (q *Queries) UpdateProductStockAbsolute(ctx context.Context, arg UpdateProductStockAbsoluteParams) (Product, error) {
+	row := q.db.QueryRow(ctx, updateProductStockAbsolute, arg.ID, arg.Stock)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Price,
+		&i.Stock,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StoreID,
+	)
+	return i, err
+}
+
+const updateStore = `-- name: UpdateStore :one
+UPDATE stores
+SET name = $2, domain = $3, description = $4, updated_at = now()
+WHERE id = $1
+    RETURNING id, name, domain, description, created_at, updated_at, admin_id
+`
+
+type UpdateStoreParams struct {
+	ID          pgtype.UUID
+	Name        string
+	Domain      pgtype.Text
+	Description string
+}
+
+func (q *Queries) UpdateStore(ctx context.Context, arg UpdateStoreParams) (Store, error) {
+	row := q.db.QueryRow(ctx, updateStore,
+		arg.ID,
+		arg.Name,
+		arg.Domain,
+		arg.Description,
+	)
+	var i Store
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AdminID,
+	)
+	return i, err
+}
+
+const updateUser = `-- name: UpdateUser :one
+UPDATE users
+SET name = $2, email = $3, password_hash = $4, is_active = $5, role = $6, updated_at = now()
+WHERE id = $1
+    RETURNING id, name, email, password_hash, is_active, role, created_at, updated_at
+`
+
+type UpdateUserParams struct {
+	ID           pgtype.UUID
+	Name         string
+	Email        string
+	PasswordHash string
+	IsActive     bool
+	Role         UserRole
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUser,
+		arg.ID,
+		arg.Name,
+		arg.Email,
+		arg.PasswordHash,
+		arg.IsActive,
+		arg.Role,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.PasswordHash,
+		&i.IsActive,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

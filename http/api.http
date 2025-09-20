@@ -1,12 +1,103 @@
-### Get users
-GET http://localhost:8080/users
+### ---------------------------------
+### Health check
+### ---------------------------------
+GET {{host}}/health
 
-### Create a user
-POST http://localhost:8080/users
+
+### ---------------------------------
+### USERS
+### ---------------------------------
+
+### Create a user (Admin who owns the store)
+POST {{host}}/users
 Content-Type: application/json
 
 {
-  "Name": "Qinny",
-  "Email": "muttaqin.muzakkir@gmail.com",
-  "PasswordHash": "Muttaqin"
+  "Name": "Alice Admin",
+  "Email": "alice.admin@example.com",
+  "PasswordHash": "secret123"
 }
+
+### Get all users
+GET {{host}}/users
+
+
+### ---------------------------------
+### STORES
+### ---------------------------------
+
+### Create a store (owned by Alice Admin → replace USER_ID with actual UUID)
+POST {{host}}/stores
+Content-Type: application/json
+
+{
+  "Name": "Main Store",
+  "Domain": "mainstore.com",
+  "Description": "The flagship store for Atomic Commerce",
+  "AdminID": "d24692ac-55fb-4432-bb85-3cc6896d4a10"
+}
+
+### Get all stores
+GET {{host}}/stores
+
+
+### ---------------------------------
+### PRODUCTS
+### ---------------------------------
+
+### Create a product (owned by the store → replace STORE_ID)
+POST {{host}}/products
+Content-Type: application/json
+
+{
+  "Name": "Cool Hoodie",
+  "Description": "A comfy black hoodie with logo",
+  "Price": 49.99,
+  "Stock": 10,
+  "StoreID": "f8dfeadb-92e3-4e34-b9dd-2b7cfd8c935c"
+}
+
+### Get all products
+GET {{host}}/products
+
+### Update stock
+PATCH {{host}}/products/8a6624d3-916a-480c-94ab-21b2dc9925d7/stock
+Content-Type: application/json
+
+{
+  "ID": "8a6624d3-916a-480c-94ab-21b2dc9925d7",
+  "stock": 100
+}
+
+
+### ---------------------------------
+### CHECKOUT
+### ---------------------------------
+
+### Create an order (replace USER_ID + PRODUCT_ID)
+POST {{host}}/checkout
+Content-Type: application/json
+
+{
+  "userId": "38fca0ee-e9d4-4ace-8a0d-e0a966813b74",
+  "productId": "8a6624d3-916a-480c-94ab-21b2dc9925d7",
+  "quantity": 2
+}
+
+### Get all orders
+GET {{host}}/orders
+
+
+### ---------------------------------
+### PAYMENTS
+### ---------------------------------
+
+POST {{host}}/payments
+Content-Type: application/json
+
+{
+  "orderId": "REPLACE-WITH-ORDER-UUID",
+  "amount": 99.98,
+  "method": "credit_card"
+}
+
